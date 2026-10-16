@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberPulse // Network Packet & Error Detection Sentinel</title>
+    
+    <!-- Self-contained local JS libraries (Zero external CDN dependency) -->
+    <script src="/static/js/chart.umd.min.js"></script>
+    <script src="/static/js/socket.io.min.js"></script>
+
+    <!-- Fail-safe CDN fallback -->
+    <script>
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"><\/script>');
+        }
+        if (typeof io === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.4/dist/socket.io.min.js"><\/script>');
+        }
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-base: #090d16;
+            --bg-surface: #101726;
+            --bg-card: rgba(17, 26, 44, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(56, 189, 248, 0.4);
+            
+            --accent-cyan: #38bdf8;
+            --accent-blue: #3b82f6;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --accent-purple: #a855f7;
+
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(56, 189, 248, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(244, 63, 94, 0.05) 0%, transparent 40%);
+        }
+
+        /* Top Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-subtle);
+            margin-bottom: 24px;
+        }
+
+        .brand-section {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
+        }
+
+        .brand-logo svg {
+            width: 24px;
+            height: 24px;
+            fill: white;
+        }
+
+        .brand-title h1 {
+            font-size: 1.35rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-title p {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .badge-live {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-emerald);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .badge-paused {
+            background: rgba(245, 158, 11, 0.18) !important;
+            color: var(--accent-amber) !important;
+            border-color: rgba(245, 158, 11, 0.4) !important;
+        }
+
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--accent-emerald);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.85); }
+        }
+
+        /* Action Toolbar */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .btn {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 600;
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-surface);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--border-focus);
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .btn-pause {
+            background: rgba(245, 158, 11, 0.12);
+            border-color: rgba(245, 158, 11, 0.3);
+            color: var(--accent-amber);
+        }
+
+        .btn-resume {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.4);
+            color: var(--accent-emerald);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+        }
+
+        .btn-danger {
+            background: rgba(244, 63, 94, 0.12);
+            border-color: rgba(244, 63, 94, 0.3);
+            color: #fda4af;
+        }
+
+        .btn-danger:hover {
+            background: rgba(244, 63, 94, 0.25);
+            border-color: var(--accent-rose);
+        }
+
+        .btn-primary {
+            background: rgba(56, 189, 248, 0.12);
+            border-color: rgba(56, 189, 248, 0.3);
+            color: var(--accent-cyan);
+        }
+
+        .btn-primary:hover {
+            background: rgba(56, 189, 248, 0.22);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 18px;
+            position: relative;
+            overflow: hidden;
+            transition: border-color 0.25s, transform 0.25s;
+        }
+
+        .stat-card:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: var(--card-accent, var(--accent-cyan));
+        }
+
+        .stat-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .stat-value {
+            font-size: 1.85rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-primary);
+        }
+
+        .stat-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .alert-pulse {
+            animation: alertGlow 1s infinite alternate;
+        }
+
+        @keyframes alertGlow {
+            from { color: #f43f5e; text-shadow: 0 0 4px rgba(244, 63, 94, 0.4); }
+            to { color: #ff859b; text-shadow: 0 0 14px rgba(244, 63, 94, 0.9); }
+        }
+
+        /* Charts Section */
+        .charts-row-main {
+            margin-bottom: 24px;
+        }
+
+        .chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .chart-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chart-legend-custom {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            font-size: 0.78rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 340px;
+            width: 100%;
+        }
+
+        /* Secondary Charts Grid */
+        .charts-grid-secondary {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-grid-secondary {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Live Table Section */
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            padding: 20px;
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 6px;
+        }
+
+        .tab-btn {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tab-btn.active {
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-cyan);
+            border-color: rgba(56, 189, 248, 0.3);
+        }
+
+        .tab-btn.active.tab-errors {
+            background: rgba(244, 63, 94, 0.2);
+            color: #fda4af;
+            border-color: rgba(244, 63, 94, 0.4);
+        }
+
+        .pill-count {
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .pill-count-red {
+            background: rgba(244, 63, 94, 0.3);
+            color: #fff;
+        }
+
+        .table-responsive {
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        th {
+            background: #141d30;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 14px;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        td {
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            white-space: nowrap;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        tr.row-error {
+            background: rgba(244, 63, 94, 0.14) !important;
+            border-left: 3px solid var(--accent-rose);
+        }
+
+        /* Badges */
+        .proto-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .proto-tcp { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+        .proto-udp { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+        .proto-icmp { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+        .proto-dns { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+        .proto-arp { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+        .proto-other { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.72rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+
+        .status-normal {
+            color: var(--accent-emerald);
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .status-alert {
+            color: #fff;
+            background: rgba(244, 63, 94, 0.3);
+            font-weight: 700;
+            border: 1px solid rgba(244, 63, 94, 0.5);
+            box-shadow: 0 0 8px rgba(244, 63, 94, 0.2);
+        }
+
+        /* Toast notification */
+        #toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            background: #1e293b;
+            color: #f8fafc;
+            border: 1px solid var(--accent-cyan);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            font-size: 0.82rem;
+            font-family: 'JetBrains Mono', monospace;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            z-index: 999;
+            pointer-events: none;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header>
+        <div class="brand-section">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                </svg>
+            </div>
+            <div class="brand-title">
+                <h1>CYBERPULSE <span id="status-badge" class="badge-live"><span class="pulse-dot"></span> LIVE (CONNECTED)</span></h1>
+                <p>Real-Time Packet Length Stream & Autonomous Network Error Detection</p>
+            </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div class="toolbar">
+            <button class="btn btn-pause" id="btn-toggle-pause" onclick="togglePause()">
+                <span>⏸ Pause</span>
+            </button>
+            <button class="btn btn-danger" onclick="injectTestError('TCP_RST')">
+                <span>⚡ Test TCP RST</span>
+            </button>
+            <button class="btn btn-danger" onclick="injectTestError('ICMP_UNREACHABLE')">
+                <span>⚡ Test ICMP Error</span>
+            </button>
+            <button class="btn btn-danger" onclick="injectTestError('BURST')">
+                <span>⚡ Traffic Burst</span>
+            </button>
+            <button class="btn" onclick="resetTelemetry()">
+                <span>🔄 Reset</span>
+            </button>
+            <button class="btn" onclick="exportCSV()">
+                <span>📥 Export CSV</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Top Key Performance Metrics -->
+    <section class="stats-grid">
+        <div class="stat-card" style="--card-accent: var(--accent-cyan)">
+            <div class="stat-label">
+                <span>Total Packets</span>
+                <span id="rate-pps" style="color: var(--accent-cyan)">0.0 pkts/s</span>
+            </div>
+            <div class="stat-value" id="stat-total-packets">0</div>
+            <div class="stat-sub">Live Sniffed via Npcap</div>
+        </div>
+
+        <div class="stat-card" style="--card-accent: var(--accent-rose)">
+            <div class="stat-label">
+                <span>Errors Detected</span>
+                <span id="error-alert-tag" style="color: var(--accent-rose)">Active</span>
+            </div>
+            <div class="stat-value" id="stat-total-errors" style="color: var(--accent-rose)">0</div>
+            <div class="stat-sub" id="stat-err-detail">TCP RST / ICMP / MTU / Scans</div>
+        </div>
+
+        <div class="stat-card" style="--card-accent: var(--accent-amber)">
+            <div class="stat-label">
+                <span>Error Rate</span>
+                <span id="stat-err-health" style="color: var(--accent-emerald)">Optimal</span>
+            </div>
+            <div class="stat-value" id="stat-error-rate">0.00%</div>
+            <div class="stat-sub">&lt; 1% Healthy Network Baseline</div>
+        </div>
+
+        <div class="stat-card" style="--card-accent: var(--accent-blue)">
+            <div class="stat-label">
+                <span>Throughput</span>
+                <span id="stat-uptime">0s</span>
+            </div>
+            <div class="stat-value" id="stat-bandwidth">0.0 <span style="font-size: 1rem; color: var(--text-muted)">Kbps</span></div>
+            <div class="stat-sub" id="stat-total-mbs">0.00 MB total payload</div>
+        </div>
+
+        <div class="stat-card" style="--card-accent: var(--accent-purple)">
+            <div class="stat-label">
+                <span>Avg Packet Length</span>
+                <span>MTU 1500B</span>
+            </div>
+            <div class="stat-value" id="stat-avg-len">0 <span style="font-size: 1rem; color: var(--text-muted)">Bytes</span></div>
+            <div class="stat-sub" id="stat-active-adapter">Adapter: Wi-Fi</div>
+        </div>
+    </section>
+
+    <!-- Primary Live Packet Length & Error Overlay Graph -->
+    <section class="charts-row-main">
+        <div class="chart-card">
+            <div class="chart-header">
+                <div class="chart-title">
+                    <span>Live Packet Length & Error Anomaly Detection</span>
+                </div>
+                <div class="chart-legend-custom">
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: var(--accent-cyan)"></div>
+                        <span>Packet Length (Bytes)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: var(--accent-rose)"></div>
+                        <span>Detected Error Spike</span>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- Secondary Charts Grid -->
+    <section class="charts-grid-secondary">
+        <!-- Protocol Breakdown -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <div class="chart-title">Protocol Distribution</div>
+            </div>
+            <div class="chart-wrapper" style="height: 230px;">
+                <canvas id="protocolChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Error Breakdown -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <div class="chart-title">Error Classification Breakdown</div>
+            </div>
+            <div class="chart-wrapper" style="height: 230px;">
+                <canvas id="errorChart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- Real-Time Packet Security Table Log -->
+    <section class="table-card">
+        <div class="table-header">
+            <div class="chart-title">Live Packet Inspection Log</div>
+            <div class="filter-tabs">
+                <button class="tab-btn active" id="tab-all" onclick="setFilter('ALL', this)">All Packets</button>
+                <button class="tab-btn tab-errors" id="tab-errors" onclick="setFilter('ERRORS', this)">
+                    Errors Only <span class="pill-count pill-count-red" id="err-tab-count">0</span>
+                </button>
+                <button class="tab-btn" onclick="setFilter('TCP', this)">TCP</button>
+                <button class="tab-btn" onclick="setFilter('UDP', this)">UDP</button>
+                <button class="tab-btn" onclick="setFilter('ICMP', this)">ICMP</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 70px;">#</th>
+                        <th style="width: 110px;">Time</th>
+                        <th>Source IP:Port</th>
+                        <th>Destination IP:Port</th>
+                        <th style="width: 80px;">Protocol</th>
+                        <th style="width: 100px;">Length</th>
+                        <th>Flags / Type</th>
+                        <th>Diagnostic Status</th>
+                    </tr>
+                </thead>
+                <tbody id="packet-tbody">
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                            Initializing live packet engine...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <div id="toast">Alert Triggered</div>
+
+    <script>
+        // Global State
+        let isPaused = false;
+        let currentFilter = 'ALL';
+        const packetHistory = [];
+        const errorHistory = [];   // Dedicated permanent storage for all detected errors
+        const MAX_POINTS = 50;
+
+        // DOM elements cache
+        const statusBadge = document.getElementById("status-badge");
+        const btnTogglePause = document.getElementById("btn-toggle-pause");
+        const statTotalPackets = document.getElementById("stat-total-packets");
+        const statTotalErrors = document.getElementById("stat-total-errors");
+        const statErrorRate = document.getElementById("stat-error-rate");
+        const statBandwidth = document.getElementById("stat-bandwidth");
+        const statAvgLen = document.getElementById("stat-avg-len");
+        const ratePps = document.getElementById("rate-pps");
+        const statTotalMbs = document.getElementById("stat-total-mbs");
+        const statUptime = document.getElementById("stat-uptime");
+        const statErrHealth = document.getElementById("stat-err-health");
+        const statActiveAdapter = document.getElementById("stat-active-adapter");
+        const packetTbody = document.getElementById("packet-tbody");
+        const errTabCount = document.getElementById("err-tab-count");
+        const toast = document.getElementById("toast");
+
+        function showToast(msg) {
+            toast.innerText = msg;
+            toast.classList.add("show");
+            setTimeout(() => toast.classList.remove("show"), 2500);
+        }
+
+        // Pre-fill baseline labels and data so axes and gridlines are drawn immediately on launch
+        const initialLabels = [];
+        const initialLengths = [];
+        const initialErrors = [];
+        const now = new Date();
+        for (let i = MAX_POINTS; i >= 1; i--) {
+            const past = new Date(now.getTime() - i * 1000);
+            const timeStr = past.toTimeString().split(' ')[0];
+            initialLabels.push(timeStr);
+            initialLengths.push(0);
+            initialErrors.push(null);
+        }
+
+        let mainChart, protocolChart, errorChart;
+
+        // Initialize Charts with try/catch to protect against any runtime failures
+        try {
+            const mainCtx = document.getElementById("mainChart").getContext("2d");
+            mainChart = new Chart(mainCtx, {
+                type: "line",
+                data: {
+                    labels: initialLabels,
+                    datasets: [
+                        {
+                            label: "Packet Length (Bytes)",
+                            data: initialLengths,
+                            borderColor: "#38bdf8",
+                            backgroundColor: "rgba(56, 189, 248, 0.12)",
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            pointHoverRadius: 6,
+                            fill: true,
+                            tension: 0.25
+                        },
+                        {
+                            label: "Error Spike",
+                            data: initialErrors,
+                            borderColor: "#f43f5e",
+                            backgroundColor: "#f43f5e",
+                            pointBackgroundColor: "#f43f5e",
+                            pointBorderColor: "#ffffff",
+                            pointBorderWidth: 2,
+                            pointRadius: 7,
+                            pointHoverRadius: 10,
+                            pointStyle: "triangle",
+                            showLine: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    layout: {
+                        padding: { left: 15, right: 15, top: 10, bottom: 5 }
+                    },
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: "#0f172a",
+                            titleColor: "#94a3b8",
+                            bodyColor: "#f8fafc",
+                            borderColor: "rgba(255, 255, 255, 0.15)",
+                            borderWidth: 1,
+                            padding: 10
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: "rgba(255, 255, 255, 0.05)" },
+                            ticks: { color: "#64748b", font: { family: "'JetBrains Mono'" }, maxTicksLimit: 12 }
+                        },
+                        y: {
+                            min: 0,
+                            suggestedMax: 1518,
+                            grid: { color: "rgba(255, 255, 255, 0.06)" },
+                            ticks: { 
+                                color: "#94a3b8",
+                                font: { family: "'JetBrains Mono'" },
+                                callback: (v) => v + " B"
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 2. Protocol Doughnut Chart
+            const protoCtx = document.getElementById("protocolChart").getContext("2d");
+            protocolChart = new Chart(protoCtx, {
+                type: "doughnut",
+                data: {
+                    labels: ["TCP", "UDP", "ICMP", "DNS", "ARP", "OTHER"],
+                    datasets: [{
+                        data: [1, 0, 0, 0, 0, 0],
+                        backgroundColor: ["#3b82f6", "#a855f7", "#f59e0b", "#10b981", "#94a3b8", "#64748b"],
+                        borderWidth: 2,
+                        borderColor: "#101726"
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: "68%",
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: "#94a3b8", boxWidth: 12, font: { family: "'JetBrains Mono'" } }
+                        }
+                    }
+                }
+            });
+
+            // 3. Error Categories Bar Chart
+            const errorCtx = document.getElementById("errorChart").getContext("2d");
+            errorChart = new Chart(errorCtx, {
+                type: "bar",
+                data: {
+                    labels: ["TCP RST", "ICMP Unreach", "TTL Expired", "Echo Reply", "Jumbo MTU", "Scan"],
+                    datasets: [{
+                        label: "Detected Incidents",
+                        data: [0, 0, 0, 0, 0, 0],
+                        backgroundColor: "#f43f5e",
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: { stepSize: 1, color: "#64748b", font: { family: "'JetBrains Mono'" } },
+                            grid: { color: "rgba(255, 255, 255, 0.04)" }
+                        },
+                        y: {
+                            ticks: { color: "#94a3b8", font: { family: "'JetBrains Mono'" } },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            console.error("Chart initialization error:", e);
+        }
+
+        // Setup WebSocket with fallback to HTTP Polling
+        let socket = null;
+        try {
+            if (typeof io !== 'undefined') {
+                socket = io();
+
+                socket.on("connect", () => {
+                    updatePauseUI(isPaused);
+                });
+
+                socket.on("disconnect", () => {
+                    statusBadge.className = "badge-live";
+                    statusBadge.style.color = "#f59e0b";
+                    statusBadge.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:#f59e0b"></span> POLLING MODE';
+                });
+
+                socket.on("init_state", (payload) => {
+                    if (payload.stats) {
+                        isPaused = !!payload.stats.is_paused;
+                        updatePauseUI(isPaused);
+                        updateStatsUI(payload.stats);
+                    }
+                    if (payload.recent_errors && payload.recent_errors.length > 0) {
+                        payload.recent_errors.forEach(e => {
+                            if (!errorHistory.some(existing => existing.id === e.id)) {
+                                errorHistory.unshift(e);
+                            }
+                        });
+                        errTabCount.innerText = errorHistory.length;
+                    }
+                    if (payload.recent_packets && payload.recent_packets.length > 0) {
+                        payload.recent_packets.forEach(pkt => {
+                            handleIncomingPacket(pkt, false);
+                        });
+                        if (mainChart) mainChart.update();
+                    }
+                });
+
+                socket.on("packet", (pkt) => {
+                    if (!isPaused) {
+                        handleIncomingPacket(pkt, true);
+                    }
+                });
+
+                socket.on("pause_state_changed", (data) => {
+                    isPaused = data.is_paused;
+                    updatePauseUI(isPaused);
+                    if (data.stats) updateStatsUI(data.stats);
+                });
+
+                socket.on("stats_reset", (stats) => {
+                    updateStatsUI(stats);
+                    if (mainChart) {
+                        mainChart.data.labels = new Array(MAX_POINTS).fill("");
+                        mainChart.data.datasets[0].data = new Array(MAX_POINTS).fill(0);
+                        mainChart.data.datasets[1].data = new Array(MAX_POINTS).fill(null);
+                        mainChart.update();
+                    }
+                    packetHistory.length = 0;
+                    errorHistory.length = 0;
+                    errTabCount.innerText = "0";
+                    renderTable();
+                });
+            }
+        } catch (err) {
+            console.warn("SocketIO initialization error, falling back to HTTP Polling:", err);
+        }
+
+        function handleIncomingPacket(pkt, shouldUpdateChart = true) {
+            packetHistory.unshift(pkt);
+            if (packetHistory.length > 200) packetHistory.pop();
+
+            // Store in dedicated permanent error array so errors are NEVER lost
+            if (pkt.is_error === 1) {
+                if (!errorHistory.some(e => e.id === pkt.id)) {
+                    errorHistory.unshift(pkt);
+                    if (errorHistory.length > 300) errorHistory.pop();
+                    errTabCount.innerText = errorHistory.length;
+                }
+            }
+
+            if (mainChart && !isPaused) {
+                const labelTime = (pkt.timestamp || "").split(".")[0] || "";
+                mainChart.data.labels.push(labelTime);
+                mainChart.data.datasets[0].data.push(pkt.length || 0);
+
+                if (pkt.is_error === 1) {
+                    // Visually spike the red error triangle
+                    const spikeHeight = Math.max((pkt.length || 100) + 200, 450);
+                    mainChart.data.datasets[1].data.push(spikeHeight);
+                    statTotalErrors.classList.add("alert-pulse");
+                } else {
+                    mainChart.data.datasets[1].data.push(null);
+                }
+
+                while (mainChart.data.labels.length > MAX_POINTS) {
+                    mainChart.data.labels.shift();
+                    mainChart.data.datasets[0].data.shift();
+                    mainChart.data.datasets[1].data.shift();
+                }
+
+                if (shouldUpdateChart) {
+                    mainChart.update();
+                }
+            }
+
+            renderTable();
+        }
+
+        // Dual-Engine Polling: Syncs telemetry every second when NOT paused
+        setInterval(() => {
+            if (!isPaused) {
+                fetchStats();
+            }
+        }, 1000);
+
+        function fetchStats() {
+            fetch("/api/stats")
+                .then(res => res.json())
+                .then(stats => {
+                    updateStatsUI(stats);
+                })
+                .catch(() => {});
+        }
+
+        // Initial fetch on page load
+        fetchStats();
+        fetch("/api/errors")
+            .then(res => res.json())
+            .then(errs => {
+                if (errs && errs.length > 0) {
+                    errs.forEach(e => {
+                        if (!errorHistory.some(existing => existing.id === e.id)) {
+                            errorHistory.unshift(e);
+                        }
+                    });
+                    errTabCount.innerText = errorHistory.length;
+                    renderTable();
+                }
+            })
+            .catch(() => {});
+
+        fetch("/api/recent")
+            .then(res => res.json())
+            .then(packets => {
+                if (packets && packets.length > 0) {
+                    packets.forEach(p => handleIncomingPacket(p, false));
+                    if (mainChart) mainChart.update();
+                }
+            })
+            .catch(() => {});
+
+        function updateStatsUI(stats) {
+            if (!stats) return;
+            statTotalPackets.innerText = Number(stats.total_packets || 0).toLocaleString();
+            statTotalErrors.innerText = Number(stats.total_errors || 0).toLocaleString();
+            statErrorRate.innerText = (stats.error_rate || 0).toFixed(2) + "%";
+            statBandwidth.innerHTML = (stats.bandwidth_kbps || 0) + ' <span style="font-size: 1rem; color: var(--text-muted)">Kbps</span>';
+            ratePps.innerText = (stats.packets_per_sec || 0) + " pkts/s";
+            statAvgLen.innerHTML = (stats.avg_packet_length || 0) + ' <span style="font-size: 1rem; color: var(--text-muted)">Bytes</span>';
+            statTotalMbs.innerText = ((stats.total_bytes || 0) / (1024 * 1024)).toFixed(2) + " MB total payload";
+            statUptime.innerText = (stats.uptime_seconds || 0) + "s uptime";
+            statActiveAdapter.innerText = "Adapter: " + (stats.active_interface || "Wi-Fi");
+            if (stats.stored_errors_count !== undefined) {
+                errTabCount.innerText = stats.stored_errors_count;
+            }
+
+            if (stats.error_rate > 5.0) {
+                statErrHealth.innerText = "CRITICAL";
+                statErrHealth.style.color = "#f43f5e";
+            } else if (stats.error_rate > 1.0) {
+                statErrHealth.innerText = "ELEVATED";
+                statErrHealth.style.color = "#f59e0b";
+            } else {
+                statErrHealth.innerText = "OPTIMAL";
+                statErrHealth.style.color = "#10b981";
+            }
+
+            if (protocolChart && stats.protocols) {
+                protocolChart.data.datasets[0].data = [
+                    stats.protocols.TCP || 0,
+                    stats.protocols.UDP || 0,
+                    stats.protocols.ICMP || 0,
+                    stats.protocols.DNS || 0,
+                    stats.protocols.ARP || 0,
+                    stats.protocols.OTHER || 0
+                ];
+                protocolChart.update();
+            }
+
+            if (errorChart && stats.error_types) {
+                errorChart.data.datasets[0].data = [
+                    stats.error_types.TCP_RST || 0,
+                    stats.error_types.ICMP_UNREACHABLE || 0,
+                    stats.error_types.ICMP_TTL_EXPIRED || 0,
+                    stats.error_types.ICMP_ECHO_REPLY || 0,
+                    stats.error_types.OVERSIZED_MTU || 0,
+                    stats.error_types.SUSPICIOUS_SCAN || 0
+                ];
+                errorChart.update();
+            }
+        }
+
+        function updatePauseUI(paused) {
+            if (paused) {
+                statusBadge.className = "badge-live badge-paused";
+                statusBadge.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:#f59e0b"></span> ⏸ PAUSED (CAPTURE HALTED)';
+                btnTogglePause.innerHTML = "<span>▶ Resume</span>";
+                btnTogglePause.className = "btn btn-resume";
+            } else {
+                statusBadge.className = "badge-live";
+                statusBadge.innerHTML = '<span class="pulse-dot"></span> LIVE (CONNECTED)';
+                btnTogglePause.innerHTML = "<span>⏸ Pause</span>";
+                btnTogglePause.className = "btn btn-pause";
+            }
+        }
+
+        function togglePause() {
+            const targetState = !isPaused;
+            fetch("/api/pause", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ paused: targetState })
+            })
+            .then(res => res.json())
+            .then(data => {
+                isPaused = data.is_paused;
+                updatePauseUI(isPaused);
+                if (data.stats) updateStatsUI(data.stats);
+                showToast(isPaused ? "Capture paused: Telemetry frozen." : "Capture resumed: Live streaming active.");
+            })
+            .catch(() => {
+                isPaused = targetState;
+                updatePauseUI(isPaused);
+            });
+        }
+
+        function renderTable() {
+            let displayList = [];
+            if (currentFilter === 'ERRORS') {
+                // Read directly from dedicated error storage: guaranteed to never be empty when errors have occurred!
+                displayList = errorHistory.slice(0, 50);
+            } else if (currentFilter === 'TCP') {
+                displayList = packetHistory.filter(p => p.protocol === 'TCP').slice(0, 35);
+            } else if (currentFilter === 'UDP') {
+                displayList = packetHistory.filter(p => p.protocol === 'UDP').slice(0, 35);
+            } else if (currentFilter === 'ICMP') {
+                displayList = packetHistory.filter(p => p.protocol === 'ICMP').slice(0, 35);
+            } else {
+                displayList = packetHistory.slice(0, 35);
+            }
+
+            if (displayList.length === 0) {
+                const msg = currentFilter === 'ERRORS' 
+                    ? 'No error packets logged yet. Click "⚡ Test TCP RST" or "⚡ Test ICMP Error" to trigger an anomaly.'
+                    : 'No packets match current filter.';
+                packetTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 25px;">${msg}</td></tr>`;
+                return;
+            }
+
+            let html = "";
+            displayList.forEach(p => {
+                const isErr = p.is_error === 1;
+                const rowClass = isErr ? "row-error" : "";
+                const protoLower = (p.protocol || "other").toLowerCase();
+                const srcFormatted = p.src_port ? `${p.src_ip}:${p.src_port}` : p.src_ip;
+                const dstFormatted = p.dst_port ? `${p.dst_ip}:${p.dst_port}` : p.dst_ip;
+
+                let statusBadgeHtml = '<span class="status-badge status-normal">✓ Normal</span>';
+                if (isErr) {
+                    statusBadgeHtml = `<span class="status-badge status-alert">⚠ ${p.error_type || 'ALERT'}: ${p.error_detail || 'Network Anomaly'}</span>`;
+                }
+
+                html += `
+                    <tr class="${rowClass}">
+                        <td style="color: var(--text-muted)">#${p.id}</td>
+                        <td style="color: var(--text-secondary)">${p.timestamp}</td>
+                        <td>${srcFormatted}</td>
+                        <td>${dstFormatted}</td>
+                        <td><span class="proto-badge proto-${protoLower}">${p.protocol}</span></td>
+                        <td><strong>${p.length} B</strong></td>
+                        <td style="color: ${p.flags ? '#38bdf8' : 'var(--text-muted)'}">${p.flags || '-'}</td>
+                        <td>${statusBadgeHtml}</td>
+                    </tr>
+                `;
+            });
+            packetTbody.innerHTML = html;
+        }
+
+        function setFilter(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            // If switching to errors tab, ensure we have the latest dedicated error list
+            if (filter === 'ERRORS') {
+                fetch("/api/errors")
+                    .then(res => res.json())
+                    .then(errs => {
+                        if (errs && errs.length > 0) {
+                            errs.forEach(e => {
+                                if (!errorHistory.some(existing => existing.id === e.id)) {
+                                    errorHistory.unshift(e);
+                                }
+                            });
+                            errTabCount.innerText = errorHistory.length;
+                        }
+                        renderTable();
+                    })
+                    .catch(() => renderTable());
+            } else {
+                renderTable();
+            }
+        }
+
+        function injectTestError(errorType) {
+            showToast("Injecting test: " + errorType + "...");
+            fetch("/api/simulate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: errorType, count: errorType === 'BURST' ? 6 : 1 })
+            })
+            .then(res => res.json())
+            .then(data => {
+                showToast("Test injected successfully!");
+                fetchStats();
+                if (currentFilter === 'ERRORS') {
+                    setFilter('ERRORS', document.getElementById("tab-errors"));
+                }
+            })
+            .catch(err => {
+                showToast("Injection error: " + err);
+            });
+        }
+
+        function resetTelemetry() {
+            if (confirm("Reset all network metrics and packet counters?")) {
+                fetch("/api/reset", { method: "POST" })
+                    .then(res => res.json())
+                    .then(() => {
+                        showToast("Telemetry counters reset.");
+                        fetchStats();
+                    });
+            }
+        }
+
+        function exportCSV() {
+            const filterParam = currentFilter === 'ERRORS' ? 'errors' : 'all';
+            window.location.href = `/api/export?format=csv&filter=${filterParam}`;
+        }
+    </script>
+</body>
+</html>
